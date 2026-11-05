@@ -30,10 +30,12 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
+      console.error('[STT] Speech Recognition not supported in this browser');
       setIsSupported(false);
       return;
     }
     setIsSupported(true);
+    console.log('[STT] Speech Recognition initialized');
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -48,6 +50,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         const t = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
           final += t;
+          console.log('[STT] Final:', final);
         } else {
           interim += t;
         }
@@ -64,11 +67,15 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     };
 
     recognition.onend = () => {
+      console.log('[STT] Ended, shouldRestart:', shouldRestartRef.current, 'userStopped:', userStoppedRef.current);
       if (shouldRestartRef.current && !userStoppedRef.current) {
         restartDelayRef.current = setTimeout(() => {
           try {
             recognition.start();
-          } catch {}
+            console.log('[STT] Restarted');
+          } catch (err) {
+            console.error('[STT] Restart failed:', err);
+          }
         }, 50);
       } else {
         setIsListening(false);
@@ -77,21 +84,34 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     };
 
     recognition.onerror = (event: any) => {
+      console.error('[STT] Error:', event.error);
       if (event.error === 'no-speech' || event.error === 'aborted') {
         return;
       }
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        console.error('[STT] Mic permission denied');
         shouldRestartRef.current = false;
         setIsListening(false);
         return;
+      }
+      if (event.error === 'network') {
+        console.error('[STT] Network error - check internet connection');
       }
       if (shouldRestartRef.current && !userStoppedRef.current) {
         restartDelayRef.current = setTimeout(() => {
           try {
             recognition.start();
-          } catch {}
+            console.log('[STT] Restarted after error');
+          } catch (err) {
+            console.error('[STT] Restart after error failed:', err);
+          }
         }, 100);
       }
+    };
+
+    recognition.onstart = () => {
+      console.log('[STT] Started listening');
+      setIsListening(true);
     };
 
     recognitionRef.current = recognition;
@@ -99,12 +119,18 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     return () => {
       shouldRestartRef.current = false;
       if (restartDelayRef.current) clearTimeout(restartDelayRef.current);
-      try { recognition.abort(); } catch {}
+      try { 
+        recognition.abort(); 
+        console.log('[STT] Cleanup: aborted');
+      } catch {}
     };
   }, []);
 
   const startListening = useCallback(() => {
-    if (!recognitionRef.current) return;
+    if (!recognitionRef.current) {
+      console.error('[STT] Recognition not initialized');
+      return;
+    }
     userStoppedRef.current = false;
     shouldRestartRef.current = true;
     setTranscript('');
@@ -112,8 +138,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     setHasInterim(false);
     try {
       recognitionRef.current.start();
-      setIsListening(true);
-    } catch {}
+      console.log('[STT] startListening() called');
+    } catch (err) {
+      console.error('[STT] Start failed:', err);
+    }
   }, []);
 
   const stopListening = useCallback(() => {

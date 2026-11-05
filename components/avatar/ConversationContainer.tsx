@@ -20,6 +20,7 @@ interface ConversationContainerProps {
   onStart: () => void;
   onClipComplete: () => void;
   interimTranscript: string;
+  micError?: string | null;
 }
 
 export default function ConversationContainer({
@@ -34,6 +35,7 @@ export default function ConversationContainer({
   onStart,
   onClipComplete,
   interimTranscript,
+  micError,
 }: ConversationContainerProps) {
   const isStarted = phase !== 'INIT';
 
@@ -135,6 +137,17 @@ export default function ConversationContainer({
               आवाज़ से बातचीत — हाथ से टाइप करने की ज़रूरत नहीं
             </span>
           </motion.button>
+        )}
+
+        {/* Mic Error */}
+        {micError && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="w-full max-w-sm px-4 py-3 rounded-xl bg-red-500/10 border border-red-400/30 text-red-300 text-xs text-center"
+          >
+            {micError}
+          </motion.div>
         )}
       </motion.div>
 
