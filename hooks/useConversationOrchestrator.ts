@@ -38,19 +38,12 @@ interface ConversationState {
   lastDecision: DecisionResult;
   avatarState: AvatarState;
   displayText: string;
-  chips: string[];
   isProcessing: boolean;
   leadSubmitted: boolean;
   messages: ChatMessage[];
   lastInput: string;
   isUserSpeaking: boolean;
 }
-
-const SERVICE_CHIPS = [
-  'Scale Leads & Sales',
-  'AI Bots & Automation',
-  'Web / App Development',
-];
 
 export function useConversationOrchestrator() {
   const [state, setState] = useState<ConversationState>({
@@ -63,7 +56,6 @@ export function useConversationOrchestrator() {
     lastDecision: getIdleDecision(),
     avatarState: createInitialState(),
     displayText: '',
-    chips: [],
     isProcessing: false,
     leadSubmitted: false,
     messages: [],
@@ -81,13 +73,14 @@ export function useConversationOrchestrator() {
     if (currentPhase === 'SUCCESS' || currentPhase === 'INIT') return;
 
     inactivityTimer.current = setTimeout(() => {
+      const nudgeDecision = evaluateDecisionSync('', stateRef.current.step, stateRef.current.userName, 'nudge');
       setState((prev) => ({
         ...prev,
         avatarState: transitionToSpeaking('NUDGE', 'warm'),
-        displayText: 'कुछ पूछना चाहते हैं? बस बोलिए या टाइप कीजिए!',
-        lastDecision: evaluateDecisionSync('', prev.step, prev.userName, 'nudge'),
+        displayText: nudgeDecision.spokenText,
+        lastDecision: nudgeDecision,
       }));
-    }, 15000);
+    }, 12000);
   }, []);
 
   useEffect(() => {
@@ -106,7 +99,6 @@ export function useConversationOrchestrator() {
       lastDecision: decision,
       avatarState: transitionToSpeaking(decision.clipKey, decision.emotion),
       displayText: decision.spokenText,
-      chips: ['जी हाँ, बताता हूँ', 'बाद में बात करें'],
     }));
   }, []);
 
@@ -135,24 +127,6 @@ export function useConversationOrchestrator() {
     }));
   }, []);
 
-  const setListeningAvatar = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      avatarState: transitionToListening(),
-      displayText: 'सुन रही हूँ... बोलिए',
-      chips: [],
-    }));
-  }, []);
-
-  const setThinkingAvatar = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      avatarState: transitionToThinking(),
-      displayText: 'सोच रही हूँ...',
-      chips: [],
-    }));
-  }, []);
-
   const processUserInput = useCallback(
     async (input: string) => {
       if (!input.trim()) return;
@@ -164,7 +138,6 @@ export function useConversationOrchestrator() {
         isUserSpeaking: false,
         avatarState: transitionToThinking(),
         displayText: 'सोच रही हूँ...',
-        chips: [],
       }));
 
       resetInactivityTimer();
@@ -175,19 +148,52 @@ export function useConversationOrchestrator() {
         { role: 'user' as const, content: input },
       ];
 
-      if (s.phase === 'ASKING_NAME' || (s.phase === 'GREETING' && s.step >= 1)) {
-        if (!s.userName && input.length > 1) {
-          const name = input.replace(/जी|ji|sir|madam|my name is|mera naam/gi, '').trim();
-          const decision = evaluateDecisionSync(input, s.step, name, 'greeting');
+      // Step 0-1: Greeting → Ask name
+      if (s.phase === 'GREETING' || (s.phase === 'ASKING_NAME' && !s.userName)) {
+        const nameGuess = input.replace(/जी|ji|sir|madam|my name is|mera naam|नाम है|हूँ|हूं/gi, '').trim();
+        if (nameGuess.length >= 2 && nameGuess.length <= 30) {
+          const decision = evaluateDecisionSync(input, 1, nameGuess, 'greeting');
           setState((prev) => ({
             ...prev,
-            userName: name,
+            userName: nameGuess,
             phase: 'ASKING_BUSINESS',
-            step: decision.nextStep,
+            step: 1,
             lastDecision: decision,
             avatarState: transitionToSpeaking(decision.clipKey, decision.emotion),
             displayText: decision.spokenText,
-            chips: [],
+            isProcessing: false,
+            messages: newMessages,
+          }));
+          return;
+        }
+        // Name not clear, ask again
+        const clarifyDecision = evaluateDecisionSync('', 0, '', 'clarify');
+        setState((prev) => ({
+          ...prev,
+          phase: 'ASKING_NAME',
+          lastDecision: clarifyDecision,
+          avatarState: transitionToSpeaking('CLARIFY', 'neutral'),
+          displayText: 'माफ़ कीजिए, क्या आप अपना नाम दोबारा बता सकते हैं?',
+          isProcessing: false,
+          messages: newMessages,
+        }));
+        return;
+      }
+
+      // Step 2: Ask business
+      if (s.phase === 'ASKING_BUSINESS') {
+        const business = input.trim();
+        if (business.length >= 2) {
+          const decision = evaluateDecisionSync(input, 2, s.userName, 'business');
+          setState((prev) => ({
+            ...prev,
+            businessName: business,
+            industry: business,
+            phase: 'QUALIFYING',
+            step: 2,
+            lastDecision: decision,
+            avatarState: transitionToSpeaking(decision.clipKey, decision.emotion),
+            displayText: decision.spokenText,
             isProcessing: false,
             messages: newMessages,
           }));
@@ -195,27 +201,9 @@ export function useConversationOrchestrator() {
         }
       }
 
-      if (s.phase === 'ASKING_BUSINESS') {
-        const business = input.trim();
-        const decision = evaluateDecisionSync(input, s.step, s.userName, 'business');
-        setState((prev) => ({
-          ...prev,
-          businessName: business,
-          industry: input,
-          phase: 'QUALIFYING',
-          step: decision.nextStep,
-          lastDecision: decision,
-          avatarState: transitionToSpeaking(decision.clipKey, decision.emotion),
-          displayText: decision.spokenText,
-          chips: SERVICE_CHIPS,
-          isProcessing: false,
-          messages: newMessages,
-        }));
-        return;
-      }
-
+      // Step 3: Qualifying → Ask phone
       if (s.phase === 'QUALIFYING') {
-        const decision = evaluateDecisionSync(input, s.step, s.userName, 'service');
+        const decision = evaluateDecisionSync(input, 3, s.userName, 'service');
         setState((prev) => ({
           ...prev,
           phase: 'CAPTURING_PHONE',
@@ -223,13 +211,13 @@ export function useConversationOrchestrator() {
           lastDecision: decision,
           avatarState: transitionToSpeaking(decision.clipKey, decision.emotion),
           displayText: decision.spokenText,
-          chips: ['WhatsApp नंबर दें', 'बाद में बताता हूँ'],
           isProcessing: false,
           messages: newMessages,
         }));
         return;
       }
 
+      // Step 4: Capture phone
       if (s.phase === 'CAPTURING_PHONE') {
         const phoneClean = input.replace(/\D/g, '').slice(-10);
         if (phoneClean.length === 10) {
@@ -257,7 +245,6 @@ export function useConversationOrchestrator() {
             lastDecision: decision,
             avatarState: transitionToSpeaking('THANKS', 'warm'),
             displayText: decision.spokenText,
-            chips: result.success ? ['धन्यवाद!', 'और जानें'] : ['ठीक है'],
             leadSubmitted: result.success,
             isProcessing: false,
             messages: newMessages,
@@ -265,30 +252,51 @@ export function useConversationOrchestrator() {
           return;
         }
 
-        const clarifyDecision = evaluateDecisionSync('', s.step, s.userName, 'clarify');
+        // Phone not valid
+        const clarifyDecision = evaluateDecisionSync('', 3, s.userName, 'clarify');
         setState((prev) => ({
           ...prev,
-          displayText: 'कृपया सही 10 अंकों का WhatsApp नंबर बताइए।',
-          avatarState: transitionToSpeaking('CLARIFY', 'neutral'),
           lastDecision: clarifyDecision,
-          chips: ['नंबर दर्ज करें'],
+          avatarState: transitionToSpeaking('CLARIFY', 'neutral'),
+          displayText: 'कृपया सही 10 अंकों का WhatsApp नंबर बोलिए।',
           isProcessing: false,
         }));
         return;
       }
 
+      // Step 5: Success → restart or end
       if (s.phase === 'SUCCESS') {
+        if (/हाँ|yes|again|शुरू|दुबारा|बोल/i.test(input)) {
+          setState({
+            phase: 'INIT',
+            step: 0,
+            userName: '',
+            businessName: '',
+            industry: '',
+            phone: '',
+            lastDecision: getIdleDecision(),
+            avatarState: createInitialState(),
+            displayText: '',
+            isProcessing: false,
+            leadSubmitted: false,
+            messages: [],
+            lastInput: '',
+            isUserSpeaking: false,
+          });
+          return;
+        }
+        const byeDecision = evaluateDecisionSync('', 5, s.userName);
         setState((prev) => ({
           ...prev,
+          lastDecision: byeDecision,
+          avatarState: transitionToSpeaking('THANKS', 'warm'),
+          displayText: byeDecision.spokenText,
           isProcessing: false,
-          avatarState: transitionToIdle(),
-          displayText:
-            'आपका दिन शुभ और मंगलमय हो! किसी भी सवाल के लिए हम यहाँ हैं।',
-          chips: ['शुरू से बात करें', 'धन्यवाद'],
         }));
         return;
       }
 
+      // Fallback: Agnes AI
       try {
         const aiResponse = await sendToAgnesAI(newMessages, {
           userName: s.userName,
@@ -308,7 +316,6 @@ export function useConversationOrchestrator() {
           lastDecision: decision,
           avatarState: transitionToSpeakingLoop(decision.emotion),
           displayText: aiResponse.speech,
-          chips: aiResponse.chips.length > 0 ? aiResponse.chips : SERVICE_CHIPS,
           isProcessing: false,
           messages: [
             ...newMessages,
@@ -321,8 +328,7 @@ export function useConversationOrchestrator() {
           ...prev,
           lastDecision: fallbackDecision,
           avatarState: transitionToSpeakingLoop('empathetic'),
-          displayText: 'कृपया अपना WhatsApp नंबर बताइए!',
-          chips: ['नंबर दें', 'बाद में'],
+          displayText: fallbackDecision.spokenText,
           isProcessing: false,
         }));
       }
@@ -330,50 +336,13 @@ export function useConversationOrchestrator() {
     [resetInactivityTimer],
   );
 
-  const handleChipClick = useCallback(
-    (chip: string) => {
-      const cleanChip = chip.replace(/[🚀🤖💻📱🎉]/g, '').trim();
-
-      if (cleanChip === 'ठीक है' || cleanChip === 'शुरू से बात करें') {
-        setState({
-          phase: 'INIT',
-          step: 0,
-          userName: '',
-          businessName: '',
-          industry: '',
-          phone: '',
-          lastDecision: getIdleDecision(),
-          avatarState: createInitialState(),
-          displayText: '',
-          chips: [],
-          isProcessing: false,
-          leadSubmitted: false,
-          messages: [],
-          lastInput: '',
-          isUserSpeaking: false,
-        });
-        return;
-      }
-
-      if (cleanChip === 'धन्यवाद' || cleanChip === 'बाद में बात करें') {
-        return;
-      }
-
-      processUserInput(cleanChip);
-    },
-    [processUserInput],
-  );
-
   return {
     state,
     startConversation,
     processUserInput,
-    handleChipClick,
     handleClipComplete,
     handleUserStartSpeaking,
     handleUserStopSpeaking,
-    setListeningAvatar,
-    setThinkingAvatar,
     resetInactivityTimer,
   };
 }

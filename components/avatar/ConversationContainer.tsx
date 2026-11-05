@@ -4,9 +4,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HologramPortal from '@/components/avatar/HologramPortal';
 import SpeechBubble from '@/components/ui/SpeechBubble';
-import ChipSelector from '@/components/ui/ChipSelector';
-import LeadCapture from '@/components/ui/LeadCapture';
-import MicButton from '@/components/ui/MicButton';
+import VoiceIndicator from '@/components/ui/VoiceIndicator';
 import type { ConversationPhase } from '@/hooks/useConversationOrchestrator';
 import type { AvatarState } from '@/lib/avatar/avatarStateMachine';
 
@@ -14,15 +12,11 @@ interface ConversationContainerProps {
   phase: ConversationPhase;
   avatarState: AvatarState;
   displayText: string;
-  chips: string[];
   userName: string;
   isProcessing: boolean;
   isListening: boolean;
   isSpeaking: boolean;
   isSpeechSupported: boolean;
-  onChipSelect: (chip: string) => void;
-  onPhoneSubmit: (phone: string) => void;
-  onMicToggle: () => void;
   onStart: () => void;
   onClipComplete: () => void;
   interimTranscript: string;
@@ -32,167 +26,127 @@ export default function ConversationContainer({
   phase,
   avatarState,
   displayText,
-  chips,
   userName,
   isProcessing,
   isListening,
   isSpeaking,
   isSpeechSupported,
-  onChipSelect,
-  onPhoneSubmit,
-  onMicToggle,
   onStart,
   onClipComplete,
   interimTranscript,
 }: ConversationContainerProps) {
-  const showLeadForm = phase === 'CAPTURING_PHONE';
-  const showChips = chips.length > 0 && !showLeadForm;
   const isStarted = phase !== 'INIT';
 
   return (
-    <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-6 max-w-lg mx-auto">
+    <div className="relative z-10 flex flex-col items-center min-h-[100dvh] px-4 pt-8 pb-6 max-w-lg mx-auto">
+      {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="text-center mb-6"
+        className="text-center mb-4"
       >
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-siddhi-cyan via-white to-siddhi-purple bg-clip-text text-transparent">
+        <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-siddhi-cyan via-white to-siddhi-purple bg-clip-text text-transparent">
           कल्कि इंटेलिजेंस
         </h1>
-        <p className="text-white/40 text-xs mt-1 tracking-wider uppercase">
+        <p className="text-white/30 text-[10px] sm:text-xs mt-1 tracking-[0.2em] uppercase">
           AI Solutions — Indore, MP
         </p>
       </motion.div>
 
+      {/* Avatar + Voice Flow */}
       <motion.div
         layout
-        className="w-full flex flex-col items-center gap-5"
+        className="w-full flex flex-col items-center gap-4 flex-1"
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >
+        {/* Hologram Avatar */}
         <HologramPortal
           avatarState={avatarState}
           onClipComplete={onClipComplete}
-          className="w-[280px] h-[380px] sm:w-[320px] sm:h-[440px]"
+          className="w-[240px] h-[340px] sm:w-[300px] sm:h-[420px]"
         />
 
+        {/* Always-On Voice Indicator */}
+        {isStarted && (
+          <VoiceIndicator
+            isListening={isListening}
+            isSpeaking={isSpeaking}
+            isProcessing={isProcessing}
+            isSupported={isSpeechSupported}
+          />
+        )}
+
+        {/* Speech Bubble — Avatar's response */}
+        {isStarted && (
+          <div className="w-full max-w-sm">
+            <SpeechBubble
+              text={displayText}
+              isVisible={!!displayText}
+              isTyping={isProcessing}
+            />
+          </div>
+        )}
+
+        {/* Live Interim Transcript — What user is saying right now */}
         <AnimatePresence>
-          {isStarted && (isListening || isSpeaking || isProcessing) && (
+          {interimTranscript && isListening && (
             <motion.div
-              initial={{ opacity: 0, y: -8 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="flex items-center gap-2"
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-sm"
             >
-              {isListening && !isProcessing && (
-                <span className="flex items-center gap-1.5 text-red-400/80 text-xs font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-                  सुन रही हूँ...
-                </span>
-              )}
-              {isProcessing && (
-                <span className="flex items-center gap-1.5 text-yellow-400/80 text-xs font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-                  सोच रही हूँ...
-                </span>
-              )}
-              {isSpeaking && !isListening && !isProcessing && (
-                <span className="flex items-center gap-1.5 text-siddhi-cyan/80 text-xs font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-siddhi-cyan animate-pulse" />
-                  बोल रही हूँ...
-                </span>
-              )}
+              <div className="bg-white/[0.03] backdrop-blur-md border border-white/[0.06] rounded-2xl px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 animate-pulse shrink-0" />
+                  <p className="text-sm text-white/50 italic leading-relaxed">
+                    {interimTranscript}
+                  </p>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {!isStarted ? (
+        {/* Start Button */}
+        {!isStarted && (
           <motion.button
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
+            transition={{ delay: 0.5, type: 'spring', stiffness: 200 }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
             onClick={onStart}
-            className="w-full max-w-sm py-4 rounded-2xl bg-gradient-to-r from-siddhi-cyan/20 to-siddhi-purple/20 border border-siddhi-cyan/30 text-white font-semibold text-lg cursor-pointer shadow-[0_8px_32px_rgba(0,242,254,0.1)] hover:shadow-[0_12px_48px_rgba(0,242,254,0.2)] transition-shadow"
+            className="w-full max-w-sm py-4 rounded-2xl bg-gradient-to-r from-siddhi-cyan/20 to-siddhi-purple/20 border border-siddhi-cyan/30 text-white font-semibold text-base sm:text-lg cursor-pointer shadow-[0_8px_32px_rgba(0,242,254,0.1)] hover:shadow-[0_12px_48px_rgba(0,242,254,0.2)] hover:border-siddhi-cyan/50 transition-all duration-300 active:scale-95"
           >
-            <span className="flex items-center justify-center gap-2">
-              <span className="text-2xl">🙏</span>
+            <span className="flex items-center justify-center gap-3">
+              <motion.span
+                className="text-2xl"
+                animate={{ rotate: [0, -10, 10, -10, 0] }}
+                transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+              >
+                🎤
+              </motion.span>
               सिद्धि से बात करें
             </span>
+            <span className="block text-[10px] text-white/30 mt-1 font-normal">
+              आवाज़ से बातचीत — हाथ से टाइप करने की ज़रूरत नहीं
+            </span>
           </motion.button>
-        ) : (
-          <>
-            <div className="w-full max-w-sm">
-              <SpeechBubble
-                text={displayText}
-                isVisible={!!displayText}
-                isTyping={isProcessing}
-              />
-            </div>
-
-            <AnimatePresence>
-              {interimTranscript && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="text-white/40 text-sm italic text-center max-w-sm"
-                >
-                  &ldquo;{interimTranscript}&rdquo;
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="w-full max-w-sm">
-              <ChipSelector
-                chips={chips}
-                onSelect={onChipSelect}
-                isVisible={showChips}
-              />
-            </div>
-
-            <div className="w-full max-w-sm">
-              <LeadCapture
-                isVisible={showLeadForm}
-                onSubmit={onPhoneSubmit}
-                userName={userName}
-              />
-            </div>
-
-            <div className="flex items-center gap-4">
-              <MicButton
-                isListening={isListening}
-                isSpeaking={isSpeaking}
-                onToggle={onMicToggle}
-                isSupported={isSpeechSupported}
-              />
-
-              {phase === 'SUCCESS' && (
-                <motion.button
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => onChipSelect('शुरू से बात करें')}
-                  className="px-5 py-2.5 rounded-full bg-white/[0.06] backdrop-blur-md border border-white/[0.1] text-white/70 text-sm font-medium cursor-pointer hover:bg-white/[0.1] transition-all"
-                >
-                  नई बातचीत
-                </motion.button>
-              )}
-            </div>
-          </>
         )}
       </motion.div>
 
+      {/* Footer */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 1 }}
-        className="mt-auto pt-6 text-center"
+        className="mt-auto pt-4 text-center"
       >
-        <p className="text-white/20 text-[10px] tracking-widest uppercase">
-          Powered by Agnes AI — Zero GPU Architecture
+        <p className="text-white/15 text-[9px] tracking-[0.15em] uppercase">
+          Realtime STT + TTS — Zero GPU — Agnes AI Brain
         </p>
       </motion.div>
     </div>

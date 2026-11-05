@@ -12,11 +12,9 @@ export default function SiddhiLandingPage() {
     state,
     startConversation,
     processUserInput,
-    handleChipClick,
     handleClipComplete,
     handleUserStartSpeaking,
     handleUserStopSpeaking,
-    setListeningAvatar,
   } = useConversationOrchestrator();
 
   const {
@@ -24,7 +22,6 @@ export default function SiddhiLandingPage() {
     transcript,
     interimTranscript,
     startListening,
-    stopListening,
     pauseListening,
     resumeListening,
     resetTranscript,
@@ -36,6 +33,8 @@ export default function SiddhiLandingPage() {
   const isTTSActive = useRef(false);
   const conversationStarted = useRef(false);
   const bargeInCooldown = useRef(false);
+  const inputQueue = useRef<string[]>([]);
+  const isProcessingQueue = useRef(false);
 
   const onTTSStart = useCallback(() => {
     isTTSActive.current = true;
@@ -48,6 +47,7 @@ export default function SiddhiLandingPage() {
 
   const { speak, stop: stopTTS, isSpeaking } = useBrowserTTS(onTTSStart, onTTSEnd);
 
+  // Unlock TTS on first user interaction
   useEffect(() => {
     const unlock = () => {
       window.speechSynthesis?.getVoices();
@@ -63,7 +63,7 @@ export default function SiddhiLandingPage() {
     };
   }, []);
 
-  // Barge-in: if user starts speaking while avatar is talking, cancel TTS
+  // Barge-in: cancel TTS when user starts speaking
   useEffect(() => {
     if (hasInterim && isTTSActive.current && !bargeInCooldown.current) {
       bargeInCooldown.current = true;
@@ -76,21 +76,39 @@ export default function SiddhiLandingPage() {
     }
   }, [hasInterim, stopTTS, pauseListening, resumeListening]);
 
-  // Realtime avatar reaction: user starts speaking → LISTENING avatar
+  // Realtime avatar reaction: user starts speaking → LISTENING
   useEffect(() => {
     if (hasInterim && !isTTSActive.current) {
       handleUserStartSpeaking();
     }
   }, [hasInterim, handleUserStartSpeaking]);
 
-  // Final transcript arrived → process input
-  useEffect(() => {
-    if (transcript && !isListening) {
-      handleUserStopSpeaking();
-      processUserInput(transcript);
-      resetTranscript();
+  // Queue-based input processing — handles multiple rapid voice inputs
+  const processQueue = useCallback(async () => {
+    if (isProcessingQueue.current) return;
+    if (inputQueue.current.length === 0) return;
+
+    isProcessingQueue.current = true;
+    while (inputQueue.current.length > 0) {
+      const input = inputQueue.current.shift()!;
+      await processUserInput(input);
+      // Small delay between queued inputs to let TTS start
+      if (inputQueue.current.length > 0) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
     }
-  }, [transcript, isListening, processUserInput, resetTranscript, handleUserStopSpeaking]);
+    isProcessingQueue.current = false;
+  }, [processUserInput]);
+
+  // Final transcript arrived → queue for processing
+  useEffect(() => {
+    if (transcript) {
+      handleUserStopSpeaking();
+      inputQueue.current.push(transcript);
+      resetTranscript();
+      processQueue();
+    }
+  }, [transcript, resetTranscript, handleUserStopSpeaking, processQueue]);
 
   // Avatar speaks when decision changes
   useEffect(() => {
@@ -103,48 +121,27 @@ export default function SiddhiLandingPage() {
     }
   }, [state.lastDecision.spokenText, speak, stopTTS]);
 
-  const handleMicToggle = useCallback(() => {
-    if (isListening) {
-      stopListening();
-    } else {
-      stopTTS();
-      resetTranscript();
-      setListeningAvatar();
-      startListening();
-    }
-  }, [isListening, startListening, stopListening, resetTranscript, setListeningAvatar, stopTTS]);
-
+  // Start conversation — auto-enable mic (always-on)
   const handleStart = useCallback(() => {
     conversationStarted.current = true;
     startConversation();
     setTimeout(() => {
       startListening();
-    }, 500);
+    }, 800);
   }, [startConversation, startListening]);
 
-  const handlePhoneSubmit = useCallback(
-    (phone: string) => {
-      processUserInput(phone);
-    },
-    [processUserInput],
-  );
-
   return (
-    <main className="relative min-h-screen">
+    <main className="relative min-h-[100dvh]">
       <AmbientBackground />
       <ConversationContainer
         phase={state.phase}
         avatarState={state.avatarState}
         displayText={state.displayText}
-        chips={state.chips}
         userName={state.userName}
         isProcessing={state.isProcessing}
         isListening={isListening}
         isSpeaking={isSpeaking}
         isSpeechSupported={isSpeechSupported}
-        onChipSelect={handleChipClick}
-        onPhoneSubmit={handlePhoneSubmit}
-        onMicToggle={handleMicToggle}
         onStart={handleStart}
         onClipComplete={handleClipComplete}
         interimTranscript={interimTranscript}
